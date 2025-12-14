@@ -108,3 +108,56 @@ cdn厂商会提供源站防护，可以设置只允许这些回源ip，来检测
 <img width="2169" height="1308" alt="OriginIP" src="https://github.com/user-attachments/assets/ce787855-1b14-4b87-bddc-9b9a1062ff8b" />
 
 用本脚本可以快速设置白名单。
+
+## 代码逻辑
+```mermaid
+flowchart TD
+    A([开始]) --> B{是否为 root 用户?}
+    B -- 否 --> B1[退出：需要 root 权限]
+    B -- 是 --> C{是否已安装 iptables?}
+    C -- 否 --> C1[退出：缺少 iptables]
+    C -- 是 --> D{PORTS_DIR 目录是否存在?}
+    D -- 否 --> D1[退出：未找到端口目录]
+    D -- 是 --> E{是否通过参数指定端口?}
+
+    E -- 是 --> F[遍历参数中的端口]
+    E -- 否 --> G[列出 PORTS_DIR 下的子目录]
+
+    G --> H{是否存在端口目录?}
+    H -- 否 --> H1[退出：没有可处理的端口]
+    H -- 是 --> I[遍历每个端口目录]
+
+    F --> J[为当前端口应用规则]
+    I --> J
+
+    J --> K{是否存在 ipv4.txt 或 ipv6.txt?}
+    K -- 否 --> K1[跳过该端口]
+    K -- 是 --> L[生成规则注释信息]
+
+    L --> M{是否存在 ipv4.txt?}
+    M -- 是 --> M1[创建或清空 IPv4 专用链]
+    M1 --> M2[根据 ipv4.txt 添加 ACCEPT 规则]
+    M2 --> M3[添加最终 DROP 规则]
+    M3 --> M4[确保 INPUT 链跳转到 IPv4 专用链]
+
+    M -- 否 --> M5[跳过 IPv4 规则]
+
+    L --> N{是否存在 ipv6.txt?}
+    N -- 是 --> N1[创建或清空 IPv6 专用链]
+    N1 --> N2[根据 ipv6.txt 添加 ACCEPT 规则]
+    N2 --> N3[添加最终 DROP 规则]
+    N3 --> N4[确保 INPUT 链跳转到 IPv6 专用链]
+
+    N -- 否 --> N5[跳过 IPv6 规则]
+
+    M4 --> O[处理下一个端口]
+    M5 --> O
+    N4 --> O
+    N5 --> O
+
+    O --> P{是否还有端口?}
+    P -- 是 --> J
+    P -- 否 --> Q([结束])
+
+
+```
