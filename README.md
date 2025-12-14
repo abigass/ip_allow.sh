@@ -161,3 +161,55 @@ This helps detect or prevent attacks such as **DDoS against the origin server**.
 <img width="2169" height="1308" alt="OriginIP" src="https://github.com/user-attachments/assets/ce787855-1b14-4b87-bddc-9b9a1062ff8b" />
 
 This script allows you to **quickly and consistently configure origin IP whitelists** at the firewall level.
+
+## Script Logic
+```mermaid
+flowchart TD
+    A([Start]) --> B{Is root user?}
+    B -- No --> B1[Exit: need root]
+    B -- Yes --> C{iptables installed?}
+    C -- No --> C1[Exit: missing iptables]
+    C -- Yes --> D{PORTS_DIR exists?}
+    D -- No --> D1[Exit: directory not found]
+    D -- Yes --> E{Ports passed as args?}
+
+    E -- Yes --> F[Loop ports from arguments]
+    E -- No --> G[List subdirectories in PORTS_DIR]
+
+    G --> H{Any port directories?}
+    H -- No --> H1[Exit: no ports found]
+    H -- Yes --> I[Loop each port directory]
+
+    F --> J[Apply rules for port]
+    I --> J
+
+    J --> K{ipv4.txt or ipv6.txt exists?}
+    K -- No --> K1[Skip this port]
+    K -- Yes --> L[Generate rule comment]
+
+    L --> M{ipv4.txt exists?}
+    M -- Yes --> M1[Create or flush IPv4 chain]
+    M1 --> M2[Add ACCEPT rules from ipv4.txt]
+    M2 --> M3[Add final DROP rule]
+    M3 --> M4[Ensure INPUT jump to IPv4 chain]
+
+    M -- No --> M5[Skip IPv4 rules]
+
+    L --> N{ipv6.txt exists?}
+    N -- Yes --> N1[Create or flush IPv6 chain]
+    N1 --> N2[Add ACCEPT rules from ipv6.txt]
+    N2 --> N3[Add final DROP rule]
+    N3 --> N4[Ensure INPUT jump to IPv6 chain]
+
+    N -- No --> N5[Skip IPv6 rules]
+
+    M4 --> O[Next port]
+    M5 --> O
+    N4 --> O
+    N5 --> O
+
+    O --> P{More ports?}
+    P -- Yes --> J
+    P -- No --> Q([End])
+
+```
