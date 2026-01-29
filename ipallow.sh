@@ -465,6 +465,19 @@ main() {
       fi
       raw_lines+=("$line")
       idx=$((idx + 1))
+
+      local saw_quit=0
+      while IFS= read -r -t 0.01 line; do
+        if [[ "$line" == "q" ]]; then
+          saw_quit=1
+          break
+        fi
+        raw_lines+=("$line")
+        idx=$((idx + 1))
+      done
+      if [[ $saw_quit -eq 1 ]]; then
+        break
+      fi
     done
 
     local -a entries=()
