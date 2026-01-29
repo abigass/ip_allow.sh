@@ -29,6 +29,7 @@ EOF
   echo "-----------------"
   echo "usage:"
   printf '  %-45s %s\n' "bash ipallow.sh -h|--help" "Show help/version"
+  printf '  %-45s %s\n' "sudo bash ipallow.sh add <port> [port2 ...]" "Interactively append entries and apply whitelist"
   printf '  %-45s %s\n' "sudo bash ipallow.sh <port> [port2 ...]" "Apply whitelist for one/more ports"
   printf '  %-45s %s\n' "sudo bash ipallow.sh" "Apply whitelist for all ports under ./ports"
   printf '  %-45s %s\n' "sudo bash ipallow.sh show" "Show counts from current iptables/ip6tables rules"
@@ -110,6 +111,46 @@ confirm() {
     y|Y|yes|YES) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+confirm_default_yes() {
+  local prompt="$1"
+  printf '%s' "$prompt"
+  local answer
+  IFS= read -r answer || true
+  case "$answer" in
+    ""|y|Y|yes|YES) return 0 ;;
+    n|N|no|NO) return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+sanitize_entry() {
+  local line="$1"
+  line="${line%$'\r'}"
+  line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -z "$line" ]] && return 1
+  [[ "$line" =~ ^# ]] && return 1
+  line="${line%%#*}"
+  line="$(printf '%s' "$line" | sed 's/[[:space:]]*$//')"
+  [[ -z "$line" ]] && return 1
+  printf '%s' "$line"
+}
+
+append_lines_to_file() {
+  local file="$1"
+  shift
+  [[ $# -gt 0 ]] || return 0
+  mkdir -p "$(dirname "$file")"
+  : >>"$file"
+  if [[ -s "$file" ]]; then
+    local last_hex
+    last_hex="$(tail -c 1 "$file" 2>/dev/null | od -An -tx1 | tr -d ' \n' || true)"
+    if [[ -n "$last_hex" && "$last_hex" != "0a" ]]; then
+      printf '\n' >>"$file"
+    fi
+  fi
+  printf '%s\n' "$@" >>"$file"
 }
 
 delete_chain_and_jumps_v4() {
@@ -367,6 +408,89 @@ main() {
 
   if [[ ${1:-} == "show" ]]; then
     show_summary
+    return 0
+  fi
+
+  if [[ ${1:-} == "add" ]]; then
+    shift || true
+    if [[ $# -lt 1 ]]; then
+      echo "Usage: sudo bash ipallow.sh add <port> [port2 ...]" >&2
+      exit 1
+    fi
+
+    local -a ports=()
+    local p
+    for p in "$@"; do
+      if ! is_valid_port "$p"; then
+        echo "Invalid port: $p" >&2
+        exit 1
+      fi
+      ports+=("$p")
+    done
+    mapfile -t ports < <(printf '%s\n' "${ports[@]}" | sort -n | uniq)
+
+    local ports_csv
+    ports_csv="$(IFS=,; echo "${ports[*]}")"
+    echo "Add the following IP entries to port ${ports_csv} whitelist:"
+
+    local -a raw_lines=()
+    local idx=0
+    while true; do
+      printf '[%03d]>>>' "$idx"
+      local line
+      IFS= read -r line || true
+      if [[ "$line" == "q" ]]; then
+        break
+      fi
+      raw_lines+=("$line")
+      idx=$((idx + 1))
+    done
+
+    local -a entries=()
+    local l
+    for l in "${raw_lines[@]}"; do
+      if l="$(sanitize_entry "$l")"; then
+        entries+=("$l")
+      fi
+    done
+
+    local total="${#entries[@]}"
+    if [[ $total -eq 0 ]]; then
+      echo "No IP entries provided; nothing to do."
+      return 0
+    fi
+
+    if ! confirm_default_yes "Save ${total} IP whitelist entries to ${ports_csv}? [Y/n] "; then
+      echo "Cancelled."
+      return 0
+    fi
+
+    require_root
+    check_deps
+
+    local -a v4=()
+    local -a v6=()
+    for l in "${entries[@]}"; do
+      if [[ "$l" == *:* ]]; then
+        v6+=("$l")
+      else
+        v4+=("$l")
+      fi
+    done
+
+    local port
+    for port in "${ports[@]}"; do
+      if [[ ${#v4[@]} -gt 0 ]]; then
+        append_lines_to_file "$PORTS_DIR/$port/ipv4.txt" "${v4[@]}"
+      fi
+      if [[ ${#v6[@]} -gt 0 ]]; then
+        append_lines_to_file "$PORTS_DIR/$port/ipv6.txt" "${v6[@]}"
+      fi
+    done
+
+    for port in "${ports[@]}"; do
+      apply_port_rules "$port"
+    done
     return 0
   fi
 
