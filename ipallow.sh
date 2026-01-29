@@ -153,6 +153,27 @@ append_lines_to_file() {
   printf '%s\n' "$@" >>"$file"
 }
 
+dedupe_whitelist_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  local tmp
+  tmp="$(mktemp "${file}.XXXXXX")"
+  local -A seen=()
+  local line entry
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if entry="$(sanitize_entry "$line")"; then
+      if [[ -z "${seen[$entry]:-}" ]]; then
+        seen["$entry"]=1
+        printf '%s\n' "$line" >>"$tmp"
+      fi
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$file"
+  mv "$tmp" "$file"
+}
+
 delete_chain_and_jumps_v4() {
   local port="$1"
   local chain="IPALLOW_${port}"
@@ -486,6 +507,11 @@ main() {
       if [[ ${#v6[@]} -gt 0 ]]; then
         append_lines_to_file "$PORTS_DIR/$port/ipv6.txt" "${v6[@]}"
       fi
+    done
+
+    for port in "${ports[@]}"; do
+      dedupe_whitelist_file "$PORTS_DIR/$port/ipv4.txt"
+      dedupe_whitelist_file "$PORTS_DIR/$port/ipv6.txt"
     done
 
     for port in "${ports[@]}"; do
